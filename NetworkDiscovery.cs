@@ -77,6 +77,9 @@ namespace FishNet.Discovery
 		/// </summary>
 		private HashSet<IPEndPoint> previouslyFoundIPEndPoints = new();
 
+		/// <summary>
+		/// <see cref="SynchronizationContext"/> reference to main thread to ensure the <see cref="ServerFoundCallback"/> is invoked on the main thread.
+		/// </summary>
 		private SynchronizationContext mainThreadSyncContext;
 
 		private void Start()
