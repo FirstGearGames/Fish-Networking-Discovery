@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -72,17 +73,16 @@ namespace FishNet.Discovery
 		public event Action<IPEndPoint> ServerFoundCallback;
 
 		/// <summary>
-		/// This list stores all the found <see cref="IPEndPoint"/>s that have been discovered by the worker thread to be processed by the main thread in the Update() function.
+		/// This HashSet stores all the previously found <see cref="IPEndPoint"/>s, so that they are not considered as "found" again when a new network discovery is run.
 		/// </summary>
-		private List<IPEndPoint> foundIPEndPoints = new();
+		private HashSet<IPEndPoint> previouslyFoundIPEndPoints = new();
 
-		/// <summary>
-		/// This list stores all the previously found <see cref="IPEndPoint"/>s, so that they are not considered as "found" again when a new network discovery is run.
-		/// </summary>
-		private List<IPEndPoint> previouslyFoundIPEndPoints = new();
+		private SynchronizationContext mainThreadSyncContext;
 
 		private void Start()
 		{
+			mainThreadSyncContext = SynchronizationContext.Current;
+
 			if (automatic)
 			{
 				InstanceFinder.ServerManager.OnServerConnectionState += ServerConnectionStateChangedHandler;
@@ -90,36 +90,6 @@ namespace FishNet.Discovery
 				InstanceFinder.ClientManager.OnClientConnectionState += ClientConnectionStateChangedHandler;
 
 				StartSearchingForServers();
-			}
-		}
-
-		private void Update() {
-			// See if we have found any IPEndPoints, and if we have, invoke the ServerFoundCallback event.
-			if (foundIPEndPoints.Count > 0) {
-				// Invoke the ServerFoundCallback with every IP address in the list.
-				foreach (IPEndPoint foundIPEndPoint in foundIPEndPoints) {
-					// Compare the address of the found endpoint with every previously found endpoint. If it matches any, do not invoke the ServerFoundCallback for it.
-					bool previouslyFound = false;
-
-					foreach (IPEndPoint previouslyFoundEndPoint in previouslyFoundIPEndPoints) {
-						if (previouslyFoundEndPoint.Address.ToString() == foundIPEndPoint.Address.ToString()) {
-                            previouslyFound = true;
-							break;
-						}
-					}
-
-					if (previouslyFound) {
-						continue;
-					}
-					else {
-						ServerFoundCallback?.Invoke(foundIPEndPoint);
-
-						previouslyFoundIPEndPoints.Add(foundIPEndPoint);
-					}
-				}
-
-				// Now clear all the IP addresses.
-				foundIPEndPoints.Clear();
 			}
 		}
 
@@ -339,10 +309,18 @@ namespace FishNet.Discovery
 
 				if (BitConverter.ToBoolean(result.Buffer, 0))
 				{
-					if (!foundIPEndPoints.Contains(result.RemoteEndPoint)) {
-						foundIPEndPoints.Add(result.RemoteEndPoint);
-					}
+					mainThreadSyncContext.Post(new SendOrPostCallback((o) => {
+						OnServerFound(result.RemoteEndPoint);
+					}), null);
 				}
+			}
+		}
+
+		void OnServerFound(IPEndPoint foundEndPoint) {
+			// Invoke the ServerFoundCallback if this IPEndPoint was not found previously.
+			if (!previouslyFoundIPEndPoints.Contains(foundEndPoint)) {
+				ServerFoundCallback?.Invoke(foundEndPoint);
+				previouslyFoundIPEndPoints.Add(foundEndPoint);
 			}
 		}
 
